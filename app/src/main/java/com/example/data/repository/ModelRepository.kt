@@ -386,8 +386,8 @@ class ModelRepository(
                 } else it
             }
         }
+        _activeLoadedModel.value = target.copy(isLoadedInVram = true)
         if (target.type == ModelType.TEXT) {
-            _activeLoadedModel.value = target.copy(isLoadedInVram = true)
             _activeTextModel.value = target.copy(isLoadedInVram = true)
         } else {
             _activeImageModel.value = target.copy(isLoadedInVram = true)

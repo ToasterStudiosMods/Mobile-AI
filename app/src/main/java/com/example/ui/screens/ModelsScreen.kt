@@ -221,7 +221,7 @@ fun ModelsScreen(
                 EdgeloomModelCard(
                     model = model,
                     poolBudgetGb = poolBudgetGb,
-                    isCurrentlyLoaded = activeLoadedModel?.id == model.id,
+                    isCurrentlyLoaded = model.isLoadedInVram,
                     onDownload = { viewModel.startDownload(model.id) },
                     onPause = { viewModel.pauseDownload(model.id) },
                     onLoad = { viewModel.loadModel(model.id) },

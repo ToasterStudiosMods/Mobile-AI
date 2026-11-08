@@ -35,6 +35,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.util.UUID
 
 import kotlinx.coroutines.flow.map
@@ -212,6 +213,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun loadModel(modelId: String) {
         modelRepository.loadModelInVram(modelId)
+        val loaded = modelRepository.models.value.find { it.id == modelId } ?: return
+        val app = getApplication<Application>()
+        val modelsDir = File(app.filesDir, "models")
+        val file = File(modelsDir, loaded.filename.substringAfterLast("/"))
+        if (loaded.type == ModelType.TEXT) {
+            inferenceEngine.loadGgufModel(file, loaded.id)
+        } else {
+            inferenceEngine.loadImageModel(file, loaded.id)
+        }
     }
 
     fun addCustomHfModel(repoId: String, filename: String, type: ModelType) {

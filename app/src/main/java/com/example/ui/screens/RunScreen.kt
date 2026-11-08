@@ -505,6 +505,7 @@ fun EdgeloomStreamingBubble(content: String, tps: Float) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun RunImageGenSection(viewModel: MainViewModel, modifier: Modifier = Modifier) {
+    val activeImageModel by viewModel.activeImageModel.collectAsState()
     val config by viewModel.imageGenConfig.collectAsState()
     val isGenerating by viewModel.isGeneratingImage.collectAsState()
     val currentStep by viewModel.imageGenStep.collectAsState()
@@ -526,7 +527,10 @@ fun RunImageGenSection(viewModel: MainViewModel, modifier: Modifier = Modifier) 
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = EdgeloomCard),
                 shape = RoundedCornerShape(14.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, EdgeloomBorder)
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (activeImageModel != null) EdgeloomOnlineGreen.copy(alpha = 0.5f) else EdgeloomBorder
+                )
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Row(
@@ -535,21 +539,26 @@ fun RunImageGenSection(viewModel: MainViewModel, modifier: Modifier = Modifier) 
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "ON-DEVICE DIFFUSION STATUS",
+                            text = if (activeImageModel != null) "VRAM STATUS · ACTIVE" else "VRAM STATUS · IDLE",
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
-                            color = EdgeloomSignalEmber,
+                            color = if (activeImageModel != null) EdgeloomOnlineGreen else EdgeloomSignalEmber,
                             letterSpacing = 1.sp
                         )
                         Text(
-                            text = "Strict Local Policy",
-                            fontSize = 10.sp,
-                            color = EdgeloomTextDim
+                            text = if (activeImageModel != null) "Model: ${activeImageModel!!.name}" else "No image model loaded",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (activeImageModel != null) EdgeloomPrimaryLime else EdgeloomTextDim
                         )
                     }
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Real on-device diffusion requires minimum 6GB RAM and downloaded UNet/ONNX weights (~1.8GB). Cloud AI fallbacks (Gemini/Pollinations) are completely disabled to ensure zero data leakage.",
+                        text = if (activeImageModel != null) {
+                            "Loaded in VRAM: ${activeImageModel!!.name} (${activeImageModel!!.quantization}). Ready to synthesize on-device diffusion frames with zero cloud dependence."
+                        } else {
+                            "To synthesize images, go to the Models tab to download and click 'Load Model' on an image model (Tiny-SD Mobile or SDXL-Turbo)."
+                        },
                         fontSize = 11.sp,
                         color = EdgeloomTextMuted,
                         lineHeight = 16.sp
