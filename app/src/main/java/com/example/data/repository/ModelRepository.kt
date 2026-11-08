@@ -71,14 +71,14 @@ class ModelRepository(
             AiModelInfo(
                 id = "llama-3.2-1b-instruct",
                 name = "Meta Llama 3.2 1B",
-                repoId = "meta-llama/Llama-3.2-1B-Instruct-GGUF",
+                repoId = "bartowski/Llama-3.2-1B-Instruct-GGUF",
                 filename = "Llama-3.2-1B-Instruct-Q4_K_M.gguf",
                 type = ModelType.TEXT,
                 sizeBytes = 820_000_000L,
                 parameters = "1.23 Billion",
                 quantization = "Q4_K_M",
                 minRamGb = 1.8f,
-                description = "Meta's official instruction-tuned lightweight model with rotary embeddings and grouped query attention.",
+                description = "Instruction-tuned lightweight model with rotary embeddings and grouped query attention (ungated community weights).",
                 architecture = "Llama-3 (GQA, RoPE)",
                 contextWindow = 4096,
                 downloadState = llamaStatus.first,
@@ -91,14 +91,14 @@ class ModelRepository(
             AiModelInfo(
                 id = "gemma-2-2b-it",
                 name = "Google Gemma 2 2B IT",
-                repoId = "google/gemma-2-2b-it-GGUF",
+                repoId = "bartowski/gemma-2-2b-it-GGUF",
                 filename = "gemma-2-2b-it-Q4_K_M.gguf",
                 type = ModelType.TEXT,
                 sizeBytes = 1_650_000_000L,
                 parameters = "2.61 Billion",
                 quantization = "Q4_K_M",
                 minRamGb = 3.2f,
-                description = "Google DeepMind's state-of-the-art small language model with sliding-window attention and logit soft-capping.",
+                description = "Google DeepMind's small language model with sliding-window attention and logit soft-capping (ungated community weights).",
                 architecture = "Gemma-2 (GeGLU, RMSNorm)",
                 contextWindow = 8192,
                 downloadState = DownloadState.NOT_DOWNLOADED,
@@ -146,10 +146,48 @@ class ModelRepository(
                 recommendationReason = "Fits under 400MB RAM, allowing multi-tasking without background kills."
             ),
             AiModelInfo(
+                id = "qwen2.5-1.5b-instruct",
+                name = "Qwen 2.5 1.5B Instruct",
+                repoId = "Qwen/Qwen2.5-1.5B-Instruct-GGUF",
+                filename = "qwen2.5-1.5b-instruct-q4_k_m.gguf",
+                type = ModelType.TEXT,
+                sizeBytes = 986_000_000L,
+                parameters = "1.54 Billion",
+                quantization = "Q4_K_M",
+                minRamGb = 2.0f,
+                description = "Powerful bilingual and coding edge model with extended 32k context capability.",
+                architecture = "Qwen-2.5 (Dense, RoPE)",
+                contextWindow = 4096,
+                downloadState = DownloadState.NOT_DOWNLOADED,
+                downloadProgress = 0f,
+                isLoadedInVram = false,
+                isRecommended = profile.totalRamGb in 4.0f..7.0f,
+                recommendationReason = "Excellent instruction following and coding capability for mid-tier devices."
+            ),
+            AiModelInfo(
+                id = "deepseek-r1-1.5b",
+                name = "DeepSeek R1 Distill 1.5B",
+                repoId = "bartowski/DeepSeek-R1-Distill-Qwen-1.5B-GGUF",
+                filename = "DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf",
+                type = ModelType.TEXT,
+                sizeBytes = 1_120_000_000L,
+                parameters = "1.78 Billion",
+                quantization = "Q4_K_M",
+                minRamGb = 2.4f,
+                description = "Reasoning-specialized distillation trained on long chains of thought (CoT).",
+                architecture = "DeepSeek (Reasoning)",
+                contextWindow = 4096,
+                downloadState = DownloadState.NOT_DOWNLOADED,
+                downloadProgress = 0f,
+                isLoadedInVram = false,
+                isRecommended = profile.totalRamGb >= 6.0f,
+                recommendationReason = "Advanced step-by-step reasoning and logical deduction."
+            ),
+            AiModelInfo(
                 id = "tiny-sd-mobile",
                 name = "Tiny-SD Mobile Denoise",
-                repoId = "segmind/tiny-sd-mobile-onnx",
-                filename = "tiny-sd-mobile-fp16.onnx",
+                repoId = "IlyasMoutawwakil/tiny-stable-diffusion-onnx",
+                filename = "unet/model.onnx",
                 type = ModelType.IMAGE,
                 sizeBytes = 860_000_000L,
                 parameters = "560 Million",
@@ -168,8 +206,8 @@ class ModelRepository(
             AiModelInfo(
                 id = "sd-turbo-onnx",
                 name = "Stability SD-Turbo ONNX",
-                repoId = "stabilityai/sd-turbo-onnx",
-                filename = "sd-turbo-unet-fp16.onnx",
+                repoId = "softwareweaver/Sdxl-Turbo-Olive-Onnx",
+                filename = "unet/model.onnx",
                 type = ModelType.IMAGE,
                 sizeBytes = 1_750_000_000L,
                 parameters = "890 Million",
@@ -241,9 +279,10 @@ class ModelRepository(
         val job = scope.launch {
             val modelsDir = File(context.filesDir, "models")
             if (!modelsDir.exists()) modelsDir.mkdirs()
-            val targetFile = File(modelsDir, model.filename)
+            val targetFilename = model.filename.substringAfterLast("/")
+            val targetFile = File(modelsDir, targetFilename)
 
-            val success = hfClient.downloadRealFile(
+            val downloadResult = hfClient.downloadRealFile(
                 repoId = model.repoId,
                 filename = model.filename,
                 destinationFile = targetFile
@@ -262,7 +301,7 @@ class ModelRepository(
                 }
             }
 
-            if (success && targetFile.exists() && targetFile.length() > 0) {
+            if (downloadResult.success && targetFile.exists() && targetFile.length() > 0) {
                 val sha = hfClient.calculateSha256(targetFile)
                 Log.i("ModelRepository", "Model downloaded successfully: ${targetFile.name}, size=${targetFile.length()} bytes, sha256=$sha")
                 _models.update { list ->
@@ -272,12 +311,15 @@ class ModelRepository(
                                 downloadState = DownloadState.DOWNLOADED,
                                 downloadProgress = 1.0f,
                                 downloadedBytes = targetFile.length(),
-                                downloadSpeedMbps = 0f
+                                downloadSpeedMbps = 0f,
+                                filename = downloadResult.resolvedFilename,
+                                repoId = downloadResult.resolvedRepoId
                             )
                         } else it
                     }
                 }
             } else {
+                Log.w("ModelRepository", "Download failed for $modelId: ${downloadResult.errorMessage}")
                 _models.update { list ->
                     list.map {
                         if (it.id == modelId) it.copy(downloadState = DownloadState.ERROR) else it

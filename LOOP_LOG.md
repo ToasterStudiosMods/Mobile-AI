@@ -59,3 +59,19 @@
 - **Score Deltas:** Area F maintained at 10/10. Zero placeholders or hardcoded worker nodes remain.
 - **Status:** All 12 Definition-of-Done items passing. CI is green: all 13 unit/Robolectric tests passed (`:app:testDebugUnitTest` BUILD SUCCESSFUL).
 
+### Iteration 5 - 2026-11-08T06:51:00-08:00
+- **Focus:** Fix model downloads failing with 401/404, support sending chat messages via Enter key.
+- **Root Cause Analysis:**
+  - Official repos `meta-llama/Llama-3.2-1B-Instruct-GGUF`, `google/gemma-2-2b-it-GGUF`, and official diffusion repos are GATED by Meta/Google on Hugging Face and return HTTP 401 Unauthorized unless an authenticated user token is provided.
+  - Guessed filenames for live search models did not match actual repository files.
+  - Chat input field lacked `ImeAction.Send` and `onKeyEvent` handlers for Enter keys.
+- **Fixes:**
+  - In `HuggingFaceApiClient.kt`: Added automatic gated-to-ungated repository mapping (`GATED_REPO_FALLBACKS`) pointing to verified public community quantizations (e.g. `bartowski/...`) that return direct 302/200 streams without login.
+  - Added dynamic repo tree resolution (`resolveBestFileForRepo` & `fetchRepoFileTree`) that queries `api/models/{repo}/tree/main` to find the exact existing GGUF/ONNX file for custom and live searched models.
+  - Added Range header recovery: automatically truncates and resets corrupted or invalid ranges (416/400) and resumes smoothly.
+  - In `ModelRepository.kt`: Swapped preset model repos to ungated public weights (`bartowski/Llama-3.2-1B-Instruct-GGUF`, `bartowski/gemma-2-2b-it-GGUF`, `HuggingFaceTB/SmolLM2-1.7B-Instruct-GGUF`, `Qwen/Qwen2.5-0.5B-Instruct-GGUF`, `Qwen/Qwen2.5-1.5B-Instruct-GGUF`, `bartowski/DeepSeek-R1-Distill-Qwen-1.5B-GGUF`, `IlyasMoutawwakil/tiny-stable-diffusion-onnx`, `softwareweaver/Sdxl-Turbo-Olive-Onnx`).
+  - In `RunScreen.kt`: Implemented sending chat messages when pressing Enter across software keyboard (`ImeAction.Send`), hardware/emulator keyboard (`Key.Enter` / `Key.NumPadEnter`), and newline input detection.
+- **Score Deltas:** Areas A & B maintained at 10/10.
+- **Status:** All 12 Definition-of-Done items green.
+
+

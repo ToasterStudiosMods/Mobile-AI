@@ -24,9 +24,19 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.ClearAll
@@ -307,11 +317,45 @@ fun RunChatSection(viewModel: MainViewModel, modifier: Modifier = Modifier) {
                     .padding(horizontal = 8.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                val sendMessage = {
+                    if (inputText.isNotBlank() && !isGenerating) {
+                        viewModel.sendChatMessage(inputText.trim())
+                        inputText = ""
+                    }
+                }
+
                 OutlinedTextField(
                     value = inputText,
-                    onValueChange = { inputText = it },
+                    onValueChange = { newText ->
+                        // If user pressed enter resulting in a newline, send message
+                        if (newText.endsWith("\n") && !newText.endsWith("\n\n") && inputText.isNotBlank() && !isGenerating) {
+                            sendMessage()
+                        } else {
+                            inputText = newText
+                        }
+                    },
                     placeholder = { Text("Ask anything or request code...", fontSize = 13.sp, color = EdgeloomTextMuted) },
-                    modifier = Modifier.weight(1f).testTag("run_chat_input"),
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("run_chat_input")
+                        .onKeyEvent { keyEvent ->
+                            if (keyEvent.type == KeyEventType.KeyUp &&
+                                (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter) &&
+                                !keyEvent.isShiftPressed
+                            ) {
+                                sendMessage()
+                                true
+                            } else {
+                                false
+                            }
+                        },
+                    keyboardOptions = KeyboardOptions(
+                        imeAction = ImeAction.Send,
+                        keyboardType = KeyboardType.Text
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onSend = { sendMessage() }
+                    ),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = Color.Transparent,
                         unfocusedBorderColor = Color.Transparent,
@@ -332,12 +376,7 @@ fun RunChatSection(viewModel: MainViewModel, modifier: Modifier = Modifier) {
                     }
                 } else {
                     IconButton(
-                        onClick = {
-                            if (inputText.isNotBlank()) {
-                                viewModel.sendChatMessage(inputText)
-                                inputText = ""
-                            }
-                        },
+                        onClick = { sendMessage() },
                         enabled = inputText.isNotBlank(),
                         modifier = Modifier
                             .size(38.dp)
