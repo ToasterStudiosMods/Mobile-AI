@@ -7,8 +7,10 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.MainActivity
 
@@ -32,8 +34,16 @@ class EdgeloomServerService : Service() {
         val port = intent?.getIntExtra(EXTRA_PORT, 8080) ?: 8080
         val ip = intent?.getStringExtra(EXTRA_IP) ?: "127.0.0.1"
 
-        val notification = buildNotification(ip, port)
-        startForeground(NOTIFICATION_ID, notification)
+        try {
+            val notification = buildNotification(ip, port)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            Log.e("EdgeloomServerService", "Could not promote to foreground service: ${e.message}", e)
+        }
 
         return START_STICKY
     }
@@ -49,7 +59,7 @@ class EdgeloomServerService : Service() {
                 setShowBadge(false)
             }
             val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
+            manager?.createNotificationChannel(channel)
         }
     }
 
@@ -81,23 +91,31 @@ class EdgeloomServerService : Service() {
         const val EXTRA_IP = "extra_ip"
 
         fun startService(context: Context, ip: String, port: Int) {
-            val intent = Intent(context, EdgeloomServerService::class.java).apply {
-                action = ACTION_START
-                putExtra(EXTRA_IP, ip)
-                putExtra(EXTRA_PORT, port)
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            try {
+                val intent = Intent(context, EdgeloomServerService::class.java).apply {
+                    action = ACTION_START
+                    putExtra(EXTRA_IP, ip)
+                    putExtra(EXTRA_PORT, port)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (e: Exception) {
+                Log.e("EdgeloomServerService", "Error starting foreground service: ${e.message}", e)
             }
         }
 
         fun stopService(context: Context) {
-            val intent = Intent(context, EdgeloomServerService::class.java).apply {
-                action = ACTION_STOP
+            try {
+                val intent = Intent(context, EdgeloomServerService::class.java).apply {
+                    action = ACTION_STOP
+                }
+                context.startService(intent)
+            } catch (e: Exception) {
+                Log.e("EdgeloomServerService", "Error stopping service: ${e.message}", e)
             }
-            context.startService(intent)
         }
     }
 }

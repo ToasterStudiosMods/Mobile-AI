@@ -83,6 +83,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val layerDistributionMode: StateFlow<String> = clusterRepository.layerDistributionMode
     val isScanningSubnet: StateFlow<Boolean> = clusterRepository.isScanningSubnet
     val scanStatus: StateFlow<String> = clusterRepository.scanStatus
+    val clusterEfficiencyWarning: StateFlow<String?> = clusterRepository.clusterEfficiencyWarning
 
     // Edgeloom Compute Pool usable budget (in GB) = sum(online RAM) * 0.7
     val computePoolUsableGb: StateFlow<Float> = combine(clusterNodes, isClusterEnabled) { nodes, enabled ->
@@ -259,6 +260,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             apiKey = apiKey
         )
         server.updateConfig(updated)
+    }
+
+    fun updateHostingPort(newPort: Int) {
+        clusterRepository.updateHostPort(newPort)
+        val current = serverConfig.value
+        updateServerConfig(newPort, current.requireApiKey, current.apiKey)
     }
 
     fun clearServerLogs() {

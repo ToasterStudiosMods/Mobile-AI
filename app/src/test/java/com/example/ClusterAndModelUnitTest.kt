@@ -24,11 +24,11 @@ class ClusterAndModelUnitTest {
         repo.addWorkerNode("Galaxy S24", "192.168.1.155", 8080)
         val updatedNodes = repo.nodes.value
 
-        assertEquals("Should have 3 nodes now", 3, updatedNodes.size)
+        assertEquals("Should have 2 nodes now", 2, updatedNodes.size)
 
         // Check layer partitioning across nodes
         val activeNodes = updatedNodes.filter { it.status == ClusterNodeStatus.ONLINE }
-        assertTrue("All 3 nodes should have layer assignments", activeNodes.all { it.assignedLayers.startsWith("Layers") })
+        assertTrue("Active nodes should have layer assignments", activeNodes.all { it.assignedLayers.startsWith("Layers") })
     }
 
     @Test

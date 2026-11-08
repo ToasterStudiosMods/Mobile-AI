@@ -47,6 +47,9 @@ class ClusterMeshRepository {
     private val _scanStatus = MutableStateFlow("")
     val scanStatus: StateFlow<String> = _scanStatus.asStateFlow()
 
+    private val _clusterEfficiencyWarning = MutableStateFlow<String?>(null)
+    val clusterEfficiencyWarning: StateFlow<String?> = _clusterEfficiencyWarning.asStateFlow()
+
     init {
         initializeCluster()
         startActiveNodePinging()
@@ -61,7 +64,7 @@ class ClusterMeshRepository {
             port = 8080,
             role = ClusterRole.LEADER,
             status = ClusterNodeStatus.ONLINE,
-            assignedLayers = "Layers 1 - 14",
+            assignedLayers = "Layers 1 - 28",
             latencyMs = 1L,
             memoryUsedMb = 1420,
             totalMemoryMb = 6144,
@@ -69,24 +72,14 @@ class ClusterMeshRepository {
             isSelf = true
         )
 
-        // Pair with demo worker node or discovered peers
-        val workerNode1 = ClusterNode(
-            id = "worker-node-1",
-            name = "Pixel Tablet (Worker 1)",
-            address = deriveSuggestedWorkerIp(selfIp),
-            port = 8080,
-            role = ClusterRole.WORKER,
-            status = ClusterNodeStatus.ONLINE,
-            assignedLayers = "Layers 15 - 28",
-            latencyMs = 14L,
-            memoryUsedMb = 1380,
-            totalMemoryMb = 8192,
-            throughputTokensPerSec = 18.2f,
-            isSelf = false
-        )
-
-        _nodes.value = listOf(selfNode, workerNode1)
+        _nodes.value = listOf(selfNode)
         rebalanceLayers()
+    }
+
+    fun updateHostPort(newPort: Int) {
+        _nodes.update { list ->
+            list.map { if (it.isSelf) it.copy(port = newPort) else it }
+        }
     }
 
     private fun startActiveNodePinging() {
@@ -304,9 +297,15 @@ class ClusterMeshRepository {
                 }
             }
         }
+
+        // Check for high-latency peers
+        val highLatencyPeer = activeNodes.find { !it.isSelf && it.latencyMs > 35L }
+        _clusterEfficiencyWarning.value = if (highLatencyPeer != null) {
+            "⚠️ Network latency to ${highLatencyPeer.name} (${highLatencyPeer.latencyMs}ms) exceeds the 35ms tensor exchange threshold. Sharding over high-latency Wi-Fi may be slower than running solely on the leader device."
+        } else null
     }
 
-    private fun getLocalIpAddress(): String {
+    fun getLocalIpAddress(): String {
         try {
             val interfaces = NetworkInterface.getNetworkInterfaces()
             while (interfaces.hasMoreElements()) {
@@ -323,12 +322,5 @@ class ClusterMeshRepository {
             Log.e("ClusterMeshRepo", "Error getting IP: ${e.message}")
         }
         return "192.168.1.105"
-    }
-
-    private fun deriveSuggestedWorkerIp(selfIp: String): String {
-        val prefix = selfIp.substringBeforeLast(".")
-        val lastSegment = selfIp.substringAfterLast(".").toIntOrNull() ?: 100
-        val targetSegment = if (lastSegment != 142) 142 else 143
-        return "$prefix.$targetSegment"
     }
 }

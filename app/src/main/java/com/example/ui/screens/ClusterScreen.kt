@@ -21,7 +21,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.PhoneAndroid
@@ -262,6 +265,26 @@ fun ClusterScreen(
                 }
             }
 
+            item {
+                val efficiencyWarning by viewModel.clusterEfficiencyWarning.collectAsState()
+                if (efficiencyWarning != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(EdgeloomSignalEmber.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                            .border(1.dp, EdgeloomSignalEmber.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 12.dp, vertical = 10.dp)
+                    ) {
+                        Text(
+                            text = efficiencyWarning!!,
+                            fontSize = 11.sp,
+                            color = EdgeloomSignalEmber,
+                            lineHeight = 16.sp
+                        )
+                    }
+                }
+            }
+
             items(nodes, key = { it.id }) { node ->
                 EdgeloomDeviceCard(
                     node = node,
@@ -277,7 +300,13 @@ fun ClusterScreen(
     }
 
     if (showAddNodeDialog) {
+        val lanIp by viewModel.lanIp.collectAsState()
+        val serverConfig by viewModel.serverConfig.collectAsState()
+
         PairDeviceDialog(
+            hostIp = lanIp,
+            currentHostPort = serverConfig.port,
+            onUpdateHostPort = { newPort -> viewModel.updateHostingPort(newPort) },
             onAdd = { name, ip, port ->
                 viewModel.addClusterNode(name, ip, port)
                 showAddNodeDialog = false
@@ -460,70 +489,189 @@ fun EdgeloomDeviceCard(
 
 @Composable
 fun PairDeviceDialog(
+    hostIp: String,
+    currentHostPort: Int,
+    onUpdateHostPort: (Int) -> Unit,
     onAdd: (name: String, ip: String, port: Int) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val clipboardManager = LocalClipboardManager.current
+    var copiedToClipboard by remember { mutableStateOf(false) }
+
+    var myHostPortText by remember(currentHostPort) { mutableStateOf(currentHostPort.toString()) }
+    var hostPortApplied by remember { mutableStateOf(false) }
+
     var name by remember { mutableStateOf("") }
-    var ip by remember { mutableStateOf("192.168.1.") }
+    var ip by remember {
+        val prefix = if (hostIp.contains(".")) hostIp.substringBeforeLast(".") + "." else "192.168.1."
+        mutableStateOf(prefix)
+    }
     var portText by remember { mutableStateOf("8080") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = EdgeloomCard,
         title = {
-            Text("Pair a device", fontWeight = FontWeight.Bold, color = EdgeloomTextPrimary)
+            Text("Cluster Pairing & Host Settings", fontWeight = FontWeight.Bold, color = EdgeloomTextPrimary, fontSize = 18.sp)
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    "Both devices need to be on the same Wi‑Fi network.",
-                    fontSize = 12.sp,
-                    color = EdgeloomTextMuted
-                )
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                // Section 1: This Device (Host Info & Port Selection)
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .border(1.dp, EdgeloomPrimaryLime.copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
+                    colors = CardDefaults.cardColors(containerColor = EdgeloomCardElevated)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "THIS DEVICE (HOST)",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = EdgeloomPrimaryLime,
+                                letterSpacing = 1.sp
+                            )
+                            IconButton(
+                                onClick = {
+                                    clipboardManager.setText(AnnotatedString("$hostIp:$myHostPortText"))
+                                    copiedToClipboard = true
+                                },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.ContentCopy,
+                                    contentDescription = "Copy host address",
+                                    tint = if (copiedToClipboard) EdgeloomOnlineGreen else EdgeloomTextMuted,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+                        }
 
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Device Name") },
-                    placeholder = { Text("e.g. Pixel Tablet, MacBook") },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = EdgeloomPrimaryLime,
-                        unfocusedBorderColor = EdgeloomBorder,
-                        focusedTextColor = EdgeloomTextPrimary,
-                        unfocusedTextColor = EdgeloomTextPrimary
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                        Spacer(modifier = Modifier.height(4.dp))
 
-                OutlinedTextField(
-                    value = ip,
-                    onValueChange = { ip = it },
-                    label = { Text("IP Address") },
-                    placeholder = { Text("192.168.1.xxx") },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = EdgeloomPrimaryLime,
-                        unfocusedBorderColor = EdgeloomBorder,
-                        focusedTextColor = EdgeloomTextPrimary,
-                        unfocusedTextColor = EdgeloomTextPrimary
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                        Text(
+                            text = "http://$hostIp:$myHostPortText",
+                            fontSize = 13.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = EdgeloomTextPrimary
+                        )
 
-                OutlinedTextField(
-                    value = portText,
-                    onValueChange = { portText = it },
-                    label = { Text("Port") },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = EdgeloomPrimaryLime,
-                        unfocusedBorderColor = EdgeloomBorder,
-                        focusedTextColor = EdgeloomTextPrimary,
-                        unfocusedTextColor = EdgeloomTextPrimary
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = myHostPortText,
+                                onValueChange = {
+                                    myHostPortText = it
+                                    hostPortApplied = false
+                                },
+                                label = { Text("Hosting Port", fontSize = 11.sp) },
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = EdgeloomPrimaryLime,
+                                    unfocusedBorderColor = EdgeloomBorder,
+                                    focusedTextColor = EdgeloomTextPrimary,
+                                    unfocusedTextColor = EdgeloomTextPrimary
+                                ),
+                                modifier = Modifier.weight(1f).height(54.dp)
+                            )
+
+                            Button(
+                                onClick = {
+                                    val newP = myHostPortText.toIntOrNull() ?: 8080
+                                    onUpdateHostPort(newP)
+                                    hostPortApplied = true
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (hostPortApplied) EdgeloomOnlineGreen else EdgeloomPrimaryLime,
+                                    contentColor = EdgeloomBackground
+                                ),
+                                modifier = Modifier.height(48.dp)
+                            ) {
+                                Text(if (hostPortApplied) "Saved" else "Set Port", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "To pair from another device, enter the IP & Port above on that device.",
+                            fontSize = 10.sp,
+                            color = EdgeloomTextDim
+                        )
+                    }
+                }
+
+                // Section 2: Connect to a Peer Device (Worker)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "CONNECT A PEER WORKER",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = EdgeloomTextMuted,
+                        letterSpacing = 1.sp
+                    )
+
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        label = { Text("Peer Name (Optional)") },
+                        placeholder = { Text("e.g. MacBook Pro, Second Phone") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = EdgeloomPrimaryLime,
+                            unfocusedBorderColor = EdgeloomBorder,
+                            focusedTextColor = EdgeloomTextPrimary,
+                            unfocusedTextColor = EdgeloomTextPrimary
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = ip,
+                            onValueChange = { ip = it },
+                            label = { Text("Peer IP") },
+                            placeholder = { Text("192.168.1.xxx") },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = EdgeloomPrimaryLime,
+                                unfocusedBorderColor = EdgeloomBorder,
+                                focusedTextColor = EdgeloomTextPrimary,
+                                unfocusedTextColor = EdgeloomTextPrimary
+                            ),
+                            modifier = Modifier.weight(2f)
+                        )
+
+                        OutlinedTextField(
+                            value = portText,
+                            onValueChange = { portText = it },
+                            label = { Text("Port") },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = EdgeloomPrimaryLime,
+                                unfocusedBorderColor = EdgeloomBorder,
+                                focusedTextColor = EdgeloomTextPrimary,
+                                unfocusedTextColor = EdgeloomTextPrimary
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
             }
         },
         confirmButton = {
@@ -534,14 +682,15 @@ fun PairDeviceDialog(
                     }
                 },
                 enabled = ip.isNotBlank(),
-                colors = ButtonDefaults.buttonColors(containerColor = EdgeloomPrimaryLime, contentColor = EdgeloomBackground)
+                colors = ButtonDefaults.buttonColors(containerColor = EdgeloomPrimaryLime, contentColor = EdgeloomBackground),
+                shape = RoundedCornerShape(8.dp)
             ) {
                 Text("Pair Device", fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", color = EdgeloomTextMuted)
+                Text("Close", color = EdgeloomTextMuted)
             }
         }
     )

@@ -30,9 +30,17 @@ class GgufReader(val file: File) {
     var dataOffset: Long = 0
         private set
 
+    private fun logError(tag: String, msg: String, tr: Throwable? = null) {
+        try {
+            android.util.Log.e(tag, msg, tr)
+        } catch (_: Throwable) {
+            System.err.println("[$tag] $msg")
+        }
+    }
+
     fun parse(): Boolean {
         if (!file.exists() || file.length() < 16) {
-            Log.e("GgufReader", "File ${file.name} does not exist or is too small.")
+            logError("GgufReader", "File ${file.name} does not exist or is too small.")
             return false
         }
 
@@ -48,7 +56,7 @@ class GgufReader(val file: File) {
                 buffer.get(magicBytes)
                 val magic = String(magicBytes)
                 if (magic != "GGUF") {
-                    Log.e("GgufReader", "Invalid GGUF magic bytes: $magic")
+                    logError("GgufReader", "Invalid GGUF magic bytes: $magic")
                     return false
                 }
 
@@ -94,7 +102,7 @@ class GgufReader(val file: File) {
                 return true
             }
         } catch (e: Exception) {
-            Log.e("GgufReader", "GGUF parse failed: ${e.message}", e)
+            logError("GgufReader", "GGUF parse failed: ${e.message}", e)
             return false
         }
     }
