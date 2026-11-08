@@ -64,33 +64,7 @@ class HardwareProfiler(private val context: Context) {
             "Normal"
         }
 
-        // Tier evaluation & recommendation
-        val performanceTier: String
-        val recommendedModelId: String
-        val recommendationSummary: String
-
-        when {
-            totalRamGb >= 8.0f -> {
-                performanceTier = "Flagship Tier"
-                recommendedModelId = "gemma-2-2b-it"
-                recommendationSummary = "Your device has ample high-speed RAM (${String.format("%.1f", totalRamGb)} GB). Recommending Google Gemma 2 2B (Q4_K_M) with full 4K context and SD-Turbo image generation."
-            }
-            totalRamGb >= 5.0f -> {
-                performanceTier = "High Performance"
-                recommendedModelId = "llama-3.2-1b-instruct"
-                recommendationSummary = "Balanced memory envelope (${String.format("%.1f", totalRamGb)} GB). Meta Llama 3.2 1B (Q4_K_M) offers great reasoning throughput with ~820MB VRAM footprint."
-            }
-            totalRamGb >= 3.0f -> {
-                performanceTier = "Balanced Tier"
-                recommendedModelId = "smollm2-1.7b-instruct"
-                recommendationSummary = "Great efficiency. SmolLM2 1.7B or Qwen 2.5 0.5B runs smoothly with fast token generation without heating the device."
-            }
-            else -> {
-                performanceTier = "Ultra Lightweight Tier"
-                recommendedModelId = "qwen2.5-0.5b-instruct"
-                recommendationSummary = "Low memory overhead mode. Qwen 2.5 0.5B fits under 400MB RAM, leaving full headroom for background multitasking."
-            }
-        }
+        val rec = evaluateRecommendation(totalRamGb)
 
         return DeviceHardwareProfile(
             totalRamGb = totalRamGb,
@@ -103,9 +77,40 @@ class HardwareProfiler(private val context: Context) {
             batteryPercent = batteryPct,
             isCharging = isCharging,
             thermalState = thermalState,
-            recommendedModelId = recommendedModelId,
-            recommendationSummary = recommendationSummary,
-            performanceTier = performanceTier
+            recommendedModelId = rec.modelId,
+            recommendationSummary = rec.explanation,
+            performanceTier = rec.tier
         )
+    }
+
+    data class RecommendationResult(
+        val tier: String,
+        val modelId: String,
+        val explanation: String
+    )
+
+    fun evaluateRecommendation(totalRamGb: Float): RecommendationResult {
+        return when {
+            totalRamGb >= 8.0f -> RecommendationResult(
+                tier = "Flagship Tier",
+                modelId = "gemma-2-2b-it",
+                explanation = "Your device has ample high-speed RAM (${String.format("%.1f", totalRamGb)} GB). Recommending Google Gemma 2 2B (Q4_K_M) with full 4K context."
+            )
+            totalRamGb >= 5.0f -> RecommendationResult(
+                tier = "High Performance",
+                modelId = "llama-3.2-1b-instruct",
+                explanation = "Balanced memory envelope (${String.format("%.1f", totalRamGb)} GB). Meta Llama 3.2 1B (Q4_K_M) offers great reasoning throughput with ~820MB VRAM footprint."
+            )
+            totalRamGb >= 3.0f -> RecommendationResult(
+                tier = "Balanced Tier",
+                modelId = "smollm2-1.7b-instruct",
+                explanation = "Great efficiency. SmolLM2 1.7B or Qwen 2.5 0.5B runs smoothly with fast token generation without heating the device."
+            )
+            else -> RecommendationResult(
+                tier = "Ultra Lightweight Tier",
+                modelId = "qwen2.5-0.5b-instruct",
+                explanation = "Low memory overhead mode. Qwen 2.5 0.5B fits under 400MB RAM, leaving full headroom for background multitasking."
+            )
+        }
     }
 }

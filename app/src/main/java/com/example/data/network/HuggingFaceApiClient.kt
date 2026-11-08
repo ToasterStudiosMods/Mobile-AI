@@ -7,10 +7,9 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
-import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
-import java.io.InputStream
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
 data class HuggingFaceModelDto(
@@ -27,8 +26,8 @@ data class HuggingFaceModelDto(
 
 class HuggingFaceApiClient {
     private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(120, TimeUnit.SECONDS)
         .followRedirects(true)
         .build()
 
@@ -36,10 +35,10 @@ class HuggingFaceApiClient {
         val list = mutableListOf<HuggingFaceModelDto>()
         try {
             val filterParam = if (filter.isNotBlank()) "&filter=$filter" else ""
-            val url = "https://huggingface.co/api/models?search=${java.net.URLEncoder.encode(query, "UTF-8")}&sort=downloads&direction=-1&limit=20$filterParam"
+            val url = "https://huggingface.co/api/models?search=${java.net.URLEncoder.encode(query, "UTF-8")}&sort=downloads&direction=-1&limit=25$filterParam"
             val request = Request.Builder()
                 .url(url)
-                .header("User-Agent", "Edgeloom-Android/1.0 (Mobile AI Hub)")
+                .header("User-Agent", "Edgeloom-Android/2.0 (Local GGUF Orchestrator)")
                 .build()
 
             val response = client.newCall(request).execute()
@@ -101,32 +100,43 @@ class HuggingFaceApiClient {
         onProgress: (downloadedBytes: Long, totalBytes: Long, speedMbps: Float) -> Unit
     ): Boolean = withContext(Dispatchers.IO) {
         val downloadUrl = "https://huggingface.co/$repoId/resolve/main/$filename"
-        val request = Request.Builder()
+        val existingBytes = if (destinationFile.exists()) destinationFile.length() else 0L
+
+        val requestBuilder = Request.Builder()
             .url(downloadUrl)
-            .header("User-Agent", "Edgeloom-Android/1.0 (Mobile Model Downloader)")
-            .build()
+            .header("User-Agent", "Edgeloom-Android/2.0 (Resumable GGUF Downloader)")
+
+        if (existingBytes > 0) {
+            requestBuilder.header("Range", "bytes=$existingBytes-")
+        }
 
         try {
             destinationFile.parentFile?.mkdirs()
-            val response = client.newCall(request).execute()
+            val response = client.newCall(requestBuilder.build()).execute()
 
-            if (!response.isSuccessful) {
-                // If specific GGUF file isn't at resolve URL, create model descriptor locally with HTTP response verification
-                Log.w("HuggingFaceApiClient", "HF resolve returned ${response.code}. Fetching model repository metadata...")
-                destinationFile.writeText("EDGELOOM_HF_DESCRIPTOR_${repoId}_$filename")
-                onProgress(100_000L, 100_000L, 2.5f)
+            if (!response.isSuccessful && response.code != 416) {
+                // If specific subfile not directly at resolve URL, attempt to query the repository tree
+                Log.e("HuggingFaceApiClient", "Download failed with HTTP ${response.code}: $downloadUrl")
+                return@withContext false
+            }
+
+            if (response.code == 416) {
+                // Range already satisfied (entire file already downloaded)
+                onProgress(destinationFile.length(), destinationFile.length(), 0f)
                 return@withContext true
             }
 
             val body = response.body ?: return@withContext false
-            val contentLength = body.contentLength().let { if (it > 0) it else 500_000_000L }
+            val isPartial = response.code == 206
+            val incomingLength = body.contentLength()
+            val totalBytes = if (isPartial) existingBytes + incomingLength else if (incomingLength > 0) incomingLength else 500_000_000L
 
-            var downloaded = 0L
+            var downloaded = if (isPartial) existingBytes else 0L
             val buffer = ByteArray(64 * 1024)
             val startTime = System.currentTimeMillis()
 
             body.byteStream().use { input ->
-                FileOutputStream(destinationFile).use { output ->
+                FileOutputStream(destinationFile, isPartial).use { output ->
                     var bytesRead: Int
                     while (input.read(buffer).also { bytesRead = it } != -1) {
                         if (!kotlinx.coroutines.currentCoroutineContext().isActive) {
@@ -136,16 +146,31 @@ class HuggingFaceApiClient {
                         downloaded += bytesRead
 
                         val elapsedSec = ((System.currentTimeMillis() - startTime) / 1000f).coerceAtLeast(0.1f)
-                        val speedMbps = (downloaded / (1024f * 1024f)) / elapsedSec
+                        val speedMbps = ((downloaded - existingBytes) / (1024f * 1024f)) / elapsedSec
 
-                        onProgress(downloaded, contentLength, speedMbps)
+                        onProgress(downloaded, totalBytes, speedMbps)
                     }
                 }
             }
-            return@withContext true
+
+            // Verify file actually has nonzero binary content
+            return@withContext destinationFile.exists() && destinationFile.length() > 0
         } catch (e: Exception) {
-            Log.e("HuggingFaceApiClient", "Download error: ${e.message}", e)
+            Log.e("HuggingFaceApiClient", "Download stream failed: ${e.message}", e)
             return@withContext false
         }
+    }
+
+    fun calculateSha256(file: File): String {
+        if (!file.exists()) return ""
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { stream ->
+            val buffer = ByteArray(32 * 1024)
+            var read: Int
+            while (stream.read(buffer).also { read = it } != -1) {
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 }

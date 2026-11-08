@@ -68,11 +68,13 @@ class LocalOpenAiServer(
         try {
             serverSocket = ServerSocket(port)
             _config.update { it.copy(isRunning = true) }
+            com.example.service.EdgeloomServerService.startService(context, _lanIp.value, port)
 
             acceptJob = scope.launch {
                 while (isActive && serverSocket != null && !serverSocket!!.isClosed) {
                     try {
                         val clientSocket = serverSocket!!.accept()
+                        clientSocket.soTimeout = 30000
                         launch {
                             handleClient(clientSocket, availableModels, clusterNodes)
                         }
@@ -96,6 +98,7 @@ class LocalOpenAiServer(
             e.printStackTrace()
         }
         serverSocket = null
+        com.example.service.EdgeloomServerService.stopService(context)
         _config.update { it.copy(isRunning = false, activeConnections = 0) }
     }
 
@@ -151,6 +154,13 @@ class LocalOpenAiServer(
                     recordLog("POST", path, 401, System.currentTimeMillis() - startTime, clientIp, 0, 0, "", "Unauthorized")
                     return
                 }
+            }
+
+            // Body length limit: max 4MB to prevent memory exhaustion attacks
+            if (contentLength > 4 * 1024 * 1024) {
+                sendJsonResponse(output, 413, """{"error":{"message":"Payload Too Large: maximum allowed body size is 4MB","type":"invalid_request_error","param":null,"code":"payload_too_large"}}""")
+                recordLog(method, path, 413, System.currentTimeMillis() - startTime, clientIp, 0, 0, "", "Payload Too Large")
+                return
             }
 
             // Read body if available

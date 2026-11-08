@@ -49,16 +49,23 @@ class ModelRepository(
         val modelsDir = File(context.filesDir, "models")
         if (!modelsDir.exists()) modelsDir.mkdirs()
 
-        // Create pre-bundled demo model weight files on device storage if not already present
-        val llamaFile = File(modelsDir, "Llama-3.2-1B-Instruct-Q4_K_M.gguf")
-        if (!llamaFile.exists()) {
-            llamaFile.writeText("GGUF_V3_LLAMA3_QUANT_Q4_K_M_WEIGHTS_EDGE_DEVICE_READY")
+        // Clean out any old mock text stubs to ensure 100% genuine GGUF binary files
+        val oldStub1 = File(modelsDir, "Llama-3.2-1B-Instruct-Q4_K_M.gguf")
+        if (oldStub1.exists() && oldStub1.length() < 1000) oldStub1.delete()
+        val oldStub2 = File(modelsDir, "tiny-sd-mobile-fp16.onnx")
+        if (oldStub2.exists() && oldStub2.length() < 1000) oldStub2.delete()
+
+        fun checkStatus(filename: String): Pair<DownloadState, Long> {
+            val file = File(modelsDir, filename)
+            return if (file.exists() && file.length() > 1024L) {
+                Pair(DownloadState.DOWNLOADED, file.length())
+            } else {
+                Pair(DownloadState.NOT_DOWNLOADED, 0L)
+            }
         }
 
-        val sdFile = File(modelsDir, "tiny-sd-mobile-fp16.onnx")
-        if (!sdFile.exists()) {
-            sdFile.writeText("ONNX_TINY_SD_MOBILE_UNET_CLIP_LATENT_DIFFUSION_TENSORS")
-        }
+        val llamaStatus = checkStatus("Llama-3.2-1B-Instruct-Q4_K_M.gguf")
+        val sdStatus = checkStatus("tiny-sd-mobile-fp16.onnx")
 
         val initialList = listOf(
             AiModelInfo(
@@ -74,10 +81,10 @@ class ModelRepository(
                 description = "Meta's official instruction-tuned lightweight model with rotary embeddings and grouped query attention.",
                 architecture = "Llama-3 (GQA, RoPE)",
                 contextWindow = 4096,
-                downloadState = DownloadState.DOWNLOADED,
-                downloadProgress = 1.0f,
-                downloadedBytes = 820_000_000L,
-                isLoadedInVram = true,
+                downloadState = llamaStatus.first,
+                downloadProgress = if (llamaStatus.first == DownloadState.DOWNLOADED) 1.0f else 0.0f,
+                downloadedBytes = llamaStatus.second,
+                isLoadedInVram = llamaStatus.first == DownloadState.DOWNLOADED,
                 isRecommended = profile.recommendedModelId == "llama-3.2-1b-instruct",
                 recommendationReason = "Optimal balance of low RAM footprint and high instruction following."
             ),
@@ -151,10 +158,10 @@ class ModelRepository(
                 description = "Mobile latent diffusion UNet compiled for edge GPUs and Hexagon NPUs.",
                 architecture = "Latent Diffusion",
                 contextWindow = 77,
-                downloadState = DownloadState.DOWNLOADED,
-                downloadProgress = 1.0f,
-                downloadedBytes = 860_000_000L,
-                isLoadedInVram = true,
+                downloadState = sdStatus.first,
+                downloadProgress = if (sdStatus.first == DownloadState.DOWNLOADED) 1.0f else 0.0f,
+                downloadedBytes = sdStatus.second,
+                isLoadedInVram = sdStatus.first == DownloadState.DOWNLOADED,
                 isRecommended = true,
                 recommendationReason = "Sub-2s mobile diffusion pipeline with hardware acceleration."
             ),
@@ -180,9 +187,9 @@ class ModelRepository(
         )
 
         _models.value = initialList
-        _activeLoadedModel.value = initialList.firstOrNull { it.id == "llama-3.2-1b-instruct" }
-        _activeTextModel.value = initialList.firstOrNull { it.id == "llama-3.2-1b-instruct" }
-        _activeImageModel.value = initialList.firstOrNull { it.id == "tiny-sd-mobile" }
+        _activeLoadedModel.value = initialList.firstOrNull { it.isLoadedInVram && it.type == ModelType.TEXT }
+        _activeTextModel.value = initialList.firstOrNull { it.isLoadedInVram && it.type == ModelType.TEXT }
+        _activeImageModel.value = initialList.firstOrNull { it.isLoadedInVram && it.type == ModelType.IMAGE }
     }
 
     private fun fetchLiveHuggingFaceTrendingModels() {
@@ -255,14 +262,16 @@ class ModelRepository(
                 }
             }
 
-            if (success) {
+            if (success && targetFile.exists() && targetFile.length() > 0) {
+                val sha = hfClient.calculateSha256(targetFile)
+                Log.i("ModelRepository", "Model downloaded successfully: ${targetFile.name}, size=${targetFile.length()} bytes, sha256=$sha")
                 _models.update { list ->
                     list.map {
                         if (it.id == modelId) {
                             it.copy(
                                 downloadState = DownloadState.DOWNLOADED,
                                 downloadProgress = 1.0f,
-                                downloadedBytes = model.sizeBytes,
+                                downloadedBytes = targetFile.length(),
                                 downloadSpeedMbps = 0f
                             )
                         } else it

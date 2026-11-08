@@ -490,6 +490,43 @@ fun RunImageGenSection(viewModel: MainViewModel, modifier: Modifier = Modifier) 
                 border = androidx.compose.foundation.BorderStroke(1.dp, EdgeloomBorder)
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "ON-DEVICE DIFFUSION STATUS",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = EdgeloomSignalEmber,
+                            letterSpacing = 1.sp
+                        )
+                        Text(
+                            text = "Strict Local Policy",
+                            fontSize = 10.sp,
+                            color = EdgeloomTextDim
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Real on-device diffusion requires minimum 6GB RAM and downloaded UNet/ONNX weights (~1.8GB). Cloud AI fallbacks (Gemini/Pollinations) are completely disabled to ensure zero data leakage.",
+                        fontSize = 11.sp,
+                        color = EdgeloomTextMuted,
+                        lineHeight = 16.sp
+                    )
+                }
+            }
+        }
+
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = EdgeloomCard),
+                shape = RoundedCornerShape(14.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, EdgeloomBorder)
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
                     Text(
                         text = "DIFFUSION PROMPT",
                         fontSize = 10.sp,
@@ -630,6 +667,31 @@ fun GeneratedImageCard(result: ImageGenResult) {
                         .clip(RoundedCornerShape(10.dp)),
                     contentScale = ContentScale.Crop
                 )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(140.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(EdgeloomCardElevated),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "IMAGE GENERATION UNAVAILABLE",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = EdgeloomSignalEmber
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = result.clusterNodeContributions,
+                            fontSize = 11.sp,
+                            color = EdgeloomTextMuted,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(10.dp))
