@@ -1,0 +1,6 @@
+{
+  "name": "Edgeloom",
+  "description": "Your local AI dashboard. Run Hugging Face models on-device, pool RAM and split layers across Wi-Fi devices, and host an OpenAI-compatible API server.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

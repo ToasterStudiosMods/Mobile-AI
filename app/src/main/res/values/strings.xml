@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">Edgeloom</string>
+    <string name="title_home">Models</string>
+    <string name="title_playground">Playground</string>
+    <string name="title_cluster">Cluster Mesh</string>
+    <string name="title_server">OpenAI API Server</string>
+    <string name="title_system">Device Specs</string>
+</resources>
