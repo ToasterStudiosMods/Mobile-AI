@@ -125,4 +125,70 @@ class OpenAiServerApiTest {
         val response = httpClient.newCall(request).execute()
         assertEquals(404, response.code)
     }
+
+    @Test
+    fun testClusterPingEndpoint_returnsOk() {
+        val request = Request.Builder()
+            .url("http://127.0.0.1:$testPort/cluster/ping")
+            .get()
+            .build()
+
+        val response = httpClient.newCall(request).execute()
+        assertEquals(200, response.code)
+        val body = response.body?.string() ?: ""
+        assertTrue(body.contains("\"status\":\"ok\""))
+    }
+
+    @Test
+    fun testClusterJoinEndpoint_returnsJoined() {
+        var joinHandled = false
+        server.onClusterJoinRequest = { name, ip, port, _ ->
+            joinHandled = true
+            true
+        }
+
+        val payload = JSONObject().apply {
+            put("name", "Test Phone 2")
+            put("ip", "192.168.1.135")
+            put("port", 8080)
+            put("memoryMb", 6144)
+        }
+
+        val request = Request.Builder()
+            .url("http://127.0.0.1:$testPort/cluster/join")
+            .post(payload.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+
+        val response = httpClient.newCall(request).execute()
+        assertEquals(200, response.code)
+        val body = response.body?.string() ?: ""
+        assertTrue(body.contains("\"status\":\"joined\""))
+        assertTrue("onClusterJoinRequest must be triggered", joinHandled)
+    }
+
+    @Test
+    fun testClusterNotifyEndpoint_returnsDelivered() {
+        var notificationHandled = false
+        server.onClusterNotificationReceived = { senderName, senderIp, message ->
+            notificationHandled = true
+            assertEquals("Host Phone", senderName)
+        }
+
+        val payload = JSONObject().apply {
+            put("senderName", "Host Phone")
+            put("senderIp", "192.168.1.100")
+            put("message", "Test alert verified!")
+        }
+
+        val request = Request.Builder()
+            .url("http://127.0.0.1:$testPort/cluster/notify")
+            .post(payload.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+
+        val response = httpClient.newCall(request).execute()
+        assertEquals(200, response.code)
+        val body = response.body?.string() ?: ""
+        assertTrue(body.contains("\"status\":\"delivered\""))
+        assertTrue("onClusterNotificationReceived must be triggered", notificationHandled)
+    }
 }

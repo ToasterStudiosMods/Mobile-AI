@@ -14,6 +14,7 @@ import com.example.data.model.ModelType
 import com.example.data.model.ServerConfig
 import com.example.data.model.ServerLog
 import com.example.data.repository.ClusterMeshRepository
+import com.example.data.repository.ClusterRoleMode
 import com.example.data.repository.HardwareProfiler
 import com.example.data.repository.ModelRepository
 import com.example.engine.LocalInferenceEngine
@@ -85,6 +86,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val isScanningSubnet: StateFlow<Boolean> = clusterRepository.isScanningSubnet
     val scanStatus: StateFlow<String> = clusterRepository.scanStatus
     val clusterEfficiencyWarning: StateFlow<String?> = clusterRepository.clusterEfficiencyWarning
+    val clusterRoleMode: StateFlow<ClusterRoleMode> = clusterRepository.clusterRoleMode
+    val isJoinedToHost: StateFlow<Boolean> = clusterRepository.isJoinedToHost
+    val joinedHostAddress: StateFlow<String?> = clusterRepository.joinedHostAddress
+    val joinedHostPort: StateFlow<Int> = clusterRepository.joinedHostPort
+    val isJoiningCluster: StateFlow<Boolean> = clusterRepository.isJoining
+    val pingFeedback: StateFlow<String?> = clusterRepository.pingFeedback
+    val incomingClusterAlert: StateFlow<String?> = clusterRepository.incomingClusterAlert
 
     // Edgeloom Compute Pool usable budget (in GB) = sum(online RAM) * 0.7
     val computePoolUsableGb: StateFlow<Float> = combine(clusterNodes, isClusterEnabled) { nodes, enabled ->
@@ -179,6 +187,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val httpClient = OkHttpClient()
 
     init {
+        // Wire server cluster callbacks
+        server.onClusterJoinRequest = { name, ip, port, _ ->
+            clusterRepository.addWorkerNode(name, ip, port)
+            true
+        }
+        server.onClusterNotificationReceived = { senderName, senderIp, message ->
+            clusterRepository.onClusterNotificationReceived(senderName, senderIp, message)
+        }
+
         // Start OpenAI server automatically so user can immediately call it
         server.startServer(modelRepository.models.value, clusterRepository.nodes.value)
     }
@@ -252,6 +269,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setDistributionMode(mode: String) {
         clusterRepository.setLayerDistributionMode(mode)
+    }
+
+    fun setClusterRoleMode(mode: ClusterRoleMode) {
+        clusterRepository.setClusterRoleMode(mode)
+    }
+
+    fun joinRemoteCluster(hostIp: String, hostPort: Int, deviceName: String = "This Device") {
+        clusterRepository.joinRemoteCluster(hostIp, hostPort, deviceName)
+    }
+
+    fun leaveCluster() {
+        clusterRepository.leaveCluster()
+    }
+
+    fun pingClusterNode(nodeId: String) {
+        clusterRepository.pingNode(nodeId)
+    }
+
+    fun sendTestNotification(nodeId: String, customMsg: String? = null) {
+        clusterRepository.sendTestNotification(nodeId, customMsg)
+    }
+
+    fun clearPingFeedback() {
+        clusterRepository.clearPingFeedback()
+    }
+
+    fun dismissIncomingAlert() {
+        clusterRepository.dismissIncomingAlert()
     }
 
     // Server actions

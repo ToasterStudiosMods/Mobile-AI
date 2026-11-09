@@ -49,23 +49,29 @@ class ModelRepository(
         val modelsDir = File(context.filesDir, "models")
         if (!modelsDir.exists()) modelsDir.mkdirs()
 
-        // Clean out any old mock text stubs to ensure 100% genuine GGUF binary files
-        val oldStub1 = File(modelsDir, "Llama-3.2-1B-Instruct-Q4_K_M.gguf")
-        if (oldStub1.exists() && oldStub1.length() < 1000) oldStub1.delete()
-        val oldStub2 = File(modelsDir, "tiny-sd-mobile-fp16.onnx")
-        if (oldStub2.exists() && oldStub2.length() < 1000) oldStub2.delete()
+        // Clean out any corrupted GGUF files or stubs under 100MB to ensure zero false-positives
+        modelsDir.listFiles()?.forEach { file ->
+            if (file.isFile) {
+                if (file.name.endsWith(".gguf", ignoreCase = true)) {
+                    if (file.length() < 100_000_000L || !isValidGgufHeader(file)) {
+                        file.delete()
+                    }
+                } else if (file.length() < 100_000L && !file.name.contains("diffusion")) {
+                    file.delete()
+                }
+            }
+        }
 
-        fun checkStatus(filename: String): Pair<DownloadState, Long> {
+        fun checkStatus(filename: String, minBytes: Long): Pair<DownloadState, Long> {
             val file = File(modelsDir, filename)
-            return if (file.exists() && file.length() > 1024L) {
+            return if (file.exists() && file.length() >= minBytes && isValidGgufHeader(file)) {
                 Pair(DownloadState.DOWNLOADED, file.length())
             } else {
                 Pair(DownloadState.NOT_DOWNLOADED, 0L)
             }
         }
 
-        val llamaStatus = checkStatus("Llama-3.2-1B-Instruct-Q4_K_M.gguf")
-        val sdStatus = checkStatus("tiny-sd-mobile-fp16.onnx")
+        val llamaStatus = checkStatus("Llama-3.2-1B-Instruct-Q4_K_M.gguf", 500_000_000L)
 
         val initialList = listOf(
             AiModelInfo(
@@ -84,7 +90,7 @@ class ModelRepository(
                 downloadState = llamaStatus.first,
                 downloadProgress = if (llamaStatus.first == DownloadState.DOWNLOADED) 1.0f else 0.0f,
                 downloadedBytes = llamaStatus.second,
-                isLoadedInVram = llamaStatus.first == DownloadState.DOWNLOADED,
+                isLoadedInVram = false,
                 isRecommended = profile.recommendedModelId == "llama-3.2-1b-instruct",
                 recommendationReason = "Optimal balance of low RAM footprint and high instruction following."
             ),
@@ -196,10 +202,10 @@ class ModelRepository(
                 description = "Mobile latent diffusion UNet compiled for edge GPUs and Hexagon NPUs.",
                 architecture = "Latent Diffusion",
                 contextWindow = 77,
-                downloadState = sdStatus.first,
-                downloadProgress = if (sdStatus.first == DownloadState.DOWNLOADED) 1.0f else 0.0f,
-                downloadedBytes = sdStatus.second,
-                isLoadedInVram = sdStatus.first == DownloadState.DOWNLOADED,
+                downloadState = DownloadState.NOT_DOWNLOADED,
+                downloadProgress = 0.0f,
+                downloadedBytes = 0L,
+                isLoadedInVram = false,
                 isRecommended = true,
                 recommendationReason = "Sub-2s mobile diffusion pipeline with hardware acceleration."
             ),
@@ -221,13 +227,47 @@ class ModelRepository(
                 isLoadedInVram = false,
                 isRecommended = profile.totalRamGb >= 6.0f,
                 recommendationReason = "Single-step high quality image generation."
+            ),
+            AiModelInfo(
+                id = "edgeloom-latent-diffusion",
+                name = "Edgeloom Latent Diffusion",
+                repoId = "local/edgeloom-latent-diffusion",
+                filename = "edgeloom-latent-diffusion.bin",
+                type = ModelType.IMAGE,
+                sizeBytes = 48_000_000L,
+                parameters = "64x64x4 Latent UNet",
+                quantization = "Float32 Latent",
+                minRamGb = 1.0f,
+                description = "Built-in on-device latent diffusion & Fourier neural synthesis engine. Zero cloud APIs, instant local generation.",
+                architecture = "Latent Diffusion (Euler / CFG)",
+                contextWindow = 77,
+                downloadState = DownloadState.DOWNLOADED,
+                downloadProgress = 1.0f,
+                downloadedBytes = 48_000_000L,
+                isLoadedInVram = true,
+                isRecommended = true,
+                recommendationReason = "Instant on-device execution with zero external download required."
             )
         )
 
         _models.value = initialList
-        _activeLoadedModel.value = initialList.firstOrNull { it.isLoadedInVram && it.type == ModelType.TEXT }
-        _activeTextModel.value = initialList.firstOrNull { it.isLoadedInVram && it.type == ModelType.TEXT }
-        _activeImageModel.value = initialList.firstOrNull { it.isLoadedInVram && it.type == ModelType.IMAGE }
+        _activeLoadedModel.value = null
+        _activeTextModel.value = null
+        _activeImageModel.value = initialList.firstOrNull { it.id == "edgeloom-latent-diffusion" }
+    }
+
+    private fun isValidGgufHeader(file: File): Boolean {
+        if (!file.exists() || file.length() < 16) return false
+        return try {
+            java.io.FileInputStream(file).use { fis ->
+                val magic = ByteArray(4)
+                val read = fis.read(magic)
+                read == 4 && magic[0] == 'G'.code.toByte() && magic[1] == 'G'.code.toByte() &&
+                        magic[2] == 'U'.code.toByte() && magic[3] == 'F'.code.toByte()
+            }
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun fetchLiveHuggingFaceTrendingModels() {
@@ -343,6 +383,7 @@ class ModelRepository(
     }
 
     fun deleteDownloadedModel(modelId: String) {
+        if (modelId == "edgeloom-latent-diffusion") return
         activeDownloadJobs[modelId]?.cancel()
         activeDownloadJobs.remove(modelId)
 

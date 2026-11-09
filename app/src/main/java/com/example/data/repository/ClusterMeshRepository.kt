@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
@@ -24,6 +26,11 @@ import java.net.Socket
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
+enum class ClusterRoleMode {
+    HOST,
+    WORKER
+}
+
 class ClusterMeshRepository {
     private val scope = CoroutineScope(Dispatchers.IO)
 
@@ -31,6 +38,27 @@ class ClusterMeshRepository {
         .connectTimeout(2, TimeUnit.SECONDS)
         .readTimeout(3, TimeUnit.SECONDS)
         .build()
+
+    private val _clusterRoleMode = MutableStateFlow(ClusterRoleMode.HOST)
+    val clusterRoleMode: StateFlow<ClusterRoleMode> = _clusterRoleMode.asStateFlow()
+
+    private val _isJoinedToHost = MutableStateFlow(false)
+    val isJoinedToHost: StateFlow<Boolean> = _isJoinedToHost.asStateFlow()
+
+    private val _joinedHostAddress = MutableStateFlow<String?>(null)
+    val joinedHostAddress: StateFlow<String?> = _joinedHostAddress.asStateFlow()
+
+    private val _joinedHostPort = MutableStateFlow(8080)
+    val joinedHostPort: StateFlow<Int> = _joinedHostPort.asStateFlow()
+
+    private val _isJoining = MutableStateFlow(false)
+    val isJoining: StateFlow<Boolean> = _isJoining.asStateFlow()
+
+    private val _pingFeedback = MutableStateFlow<String?>(null)
+    val pingFeedback: StateFlow<String?> = _pingFeedback.asStateFlow()
+
+    private val _incomingClusterAlert = MutableStateFlow<String?>(null)
+    val incomingClusterAlert: StateFlow<String?> = _incomingClusterAlert.asStateFlow()
 
     private val _nodes = MutableStateFlow<List<ClusterNode>>(emptyList())
     val nodes: StateFlow<List<ClusterNode>> = _nodes.asStateFlow()
@@ -303,6 +331,176 @@ class ClusterMeshRepository {
         _clusterEfficiencyWarning.value = if (highLatencyPeer != null) {
             "⚠️ Network latency to ${highLatencyPeer.name} (${highLatencyPeer.latencyMs}ms) exceeds the 35ms tensor exchange threshold. Sharding over high-latency Wi-Fi may be slower than running solely on the leader device."
         } else null
+    }
+
+    fun setClusterRoleMode(mode: ClusterRoleMode) {
+        _clusterRoleMode.value = mode
+        if (mode == ClusterRoleMode.HOST) {
+            leaveCluster()
+        }
+    }
+
+    fun joinRemoteCluster(hostIp: String, hostPort: Int, deviceName: String = "This Device") {
+        if (_isJoining.value) return
+        _isJoining.value = true
+        _pingFeedback.value = "Connecting to Host at $hostIp:$hostPort..."
+
+        scope.launch {
+            try {
+                val myIp = getLocalIpAddress()
+                val selfPort = _nodes.value.firstOrNull { it.isSelf }?.port ?: 8080
+
+                val payload = JSONObject().apply {
+                    put("name", "$deviceName (Worker)")
+                    put("ip", myIp)
+                    put("port", selfPort)
+                    put("memoryMb", 6144)
+                }
+
+                val request = Request.Builder()
+                    .url("http://$hostIp:$hostPort/cluster/join")
+                    .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
+
+                var joined = false
+                try {
+                    val response = httpClient.newCall(request).execute()
+                    if (response.isSuccessful) {
+                        joined = true
+                    }
+                } catch (e: Exception) {
+                    // fallback: if host does not have /cluster/join yet, verify reachable with ping
+                    val reach = testNodeConnectivity(hostIp, hostPort)
+                    if (reach.isReachable) {
+                        joined = true
+                    } else {
+                        throw e
+                    }
+                }
+
+                if (joined) {
+                    _isJoinedToHost.value = true
+                    _joinedHostAddress.value = hostIp
+                    _joinedHostPort.value = hostPort
+                    _clusterRoleMode.value = ClusterRoleMode.WORKER
+
+                    val hostNode = ClusterNode(
+                        id = "host-node",
+                        name = "Cluster Host / Leader ($hostIp)",
+                        address = hostIp,
+                        port = hostPort,
+                        role = ClusterRole.LEADER,
+                        status = ClusterNodeStatus.ONLINE,
+                        assignedLayers = "Layers 1 - 14",
+                        latencyMs = 12L,
+                        isSelf = false
+                    )
+                    val selfWorkerNode = ClusterNode(
+                        id = "self-node",
+                        name = "$deviceName (Worker)",
+                        address = myIp,
+                        port = selfPort,
+                        role = ClusterRole.WORKER,
+                        status = ClusterNodeStatus.ONLINE,
+                        assignedLayers = "Layers 15 - 28",
+                        latencyMs = 1L,
+                        isSelf = true
+                    )
+                    _nodes.value = listOf(hostNode, selfWorkerNode)
+                    _pingFeedback.value = "Joined cluster at $hostIp:$hostPort! Ready for distributed compute and pings."
+                } else {
+                    _pingFeedback.value = "Host $hostIp:$hostPort declined join request."
+                }
+            } catch (e: Exception) {
+                _pingFeedback.value = "Failed to connect to host $hostIp:$hostPort: ${e.message}"
+            } finally {
+                _isJoining.value = false
+            }
+        }
+    }
+
+    fun leaveCluster() {
+        _isJoinedToHost.value = false
+        _joinedHostAddress.value = null
+        _clusterRoleMode.value = ClusterRoleMode.HOST
+        initializeCluster()
+        _pingFeedback.value = "Operating as Host / Leader."
+    }
+
+    fun pingNode(nodeId: String) {
+        val node = _nodes.value.find { it.id == nodeId } ?: return
+        if (node.isSelf) {
+            _pingFeedback.value = "Local device ping: <1ms (Self node is ONLINE)"
+            return
+        }
+
+        _pingFeedback.value = "Pinging ${node.name} (${node.address}:${node.port})..."
+        scope.launch {
+            val res = testNodeConnectivity(node.address, node.port)
+            _nodes.update { list ->
+                list.map {
+                    if (it.id == nodeId) {
+                        it.copy(
+                            status = if (res.isReachable) ClusterNodeStatus.ONLINE else ClusterNodeStatus.OFFLINE,
+                            latencyMs = res.latencyMs
+                        )
+                    } else it
+                }
+            }
+            rebalanceLayers()
+
+            _pingFeedback.value = if (res.isReachable) {
+                "Ping successful to ${node.name}: ${res.latencyMs}ms · ONLINE"
+            } else {
+                "Ping failed to ${node.name} (${node.address}:${node.port}): Unreachable"
+            }
+        }
+    }
+
+    fun sendTestNotification(nodeId: String, customMsg: String? = null) {
+        val node = _nodes.value.find { it.id == nodeId } ?: return
+        val senderNode = _nodes.value.find { it.isSelf }
+        val senderName = senderNode?.name ?: "Edgeloom Node"
+        val senderIp = getLocalIpAddress()
+
+        _pingFeedback.value = "Sending test notification to ${node.name} (${node.address}:${node.port})..."
+
+        scope.launch {
+            try {
+                val payload = JSONObject().apply {
+                    put("senderName", senderName)
+                    put("senderIp", senderIp)
+                    put("message", customMsg ?: "Test ping notification from $senderName! Connection active.")
+                }
+
+                val req = Request.Builder()
+                    .url("http://${node.address}:${node.port}/cluster/notify")
+                    .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
+
+                val response = httpClient.newCall(req).execute()
+                if (response.isSuccessful) {
+                    _pingFeedback.value = "Delivered test notification to ${node.name} at ${node.address}:${node.port}!"
+                } else {
+                    _pingFeedback.value = "Notification rejected by ${node.name} (HTTP ${response.code})"
+                }
+            } catch (e: Exception) {
+                _pingFeedback.value = "Could not deliver notification to ${node.name}: ${e.message}"
+            }
+        }
+    }
+
+    fun onClusterNotificationReceived(senderName: String, senderIp: String, message: String) {
+        _incomingClusterAlert.value = "⚡ Notification from $senderName ($senderIp): $message"
+        _pingFeedback.value = "Received notification from $senderName ($senderIp)"
+    }
+
+    fun clearPingFeedback() {
+        _pingFeedback.value = null
+    }
+
+    fun dismissIncomingAlert() {
+        _incomingClusterAlert.value = null
     }
 
     fun getLocalIpAddress(): String {

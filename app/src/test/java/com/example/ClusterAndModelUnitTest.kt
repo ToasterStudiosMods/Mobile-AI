@@ -47,4 +47,31 @@ class ClusterAndModelUnitTest {
         val removed = repo.nodes.value.find { it.id == added.id }
         assertTrue("Node should be removed", removed == null)
     }
+
+    @Test
+    fun testWorkerRoleSwitchingAndLeave() {
+        val repo = ClusterMeshRepository()
+        assertEquals(com.example.data.repository.ClusterRoleMode.HOST, repo.clusterRoleMode.value)
+
+        repo.setClusterRoleMode(com.example.data.repository.ClusterRoleMode.WORKER)
+        assertEquals(com.example.data.repository.ClusterRoleMode.WORKER, repo.clusterRoleMode.value)
+
+        repo.leaveCluster()
+        assertEquals(com.example.data.repository.ClusterRoleMode.HOST, repo.clusterRoleMode.value)
+        org.junit.Assert.assertFalse(repo.isJoinedToHost.value)
+    }
+
+    @Test
+    fun testClusterNotificationAndFeedback() {
+        val repo = ClusterMeshRepository()
+        repo.onClusterNotificationReceived("Pixel 8", "192.168.1.120", "Test Ping Alert")
+
+        val alert = repo.incomingClusterAlert.value
+        assertNotNull(alert)
+        assertTrue(alert!!.contains("Test Ping Alert"))
+        assertTrue(alert.contains("Pixel 8"))
+
+        repo.dismissIncomingAlert()
+        org.junit.Assert.assertNull(repo.incomingClusterAlert.value)
+    }
 }

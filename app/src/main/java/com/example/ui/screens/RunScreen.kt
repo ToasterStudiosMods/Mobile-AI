@@ -39,12 +39,17 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Brush
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ClearAll
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -516,21 +521,27 @@ fun RunImageGenSection(viewModel: MainViewModel, modifier: Modifier = Modifier) 
     var steps by remember(config.steps) { mutableIntStateOf(config.steps) }
     var guidance by remember(config.guidanceScale) { mutableFloatStateOf(config.guidanceScale) }
 
+    val presetPrompts = listOf(
+        "Cyberpunk Neon City",
+        "Sunset Mountain Valley",
+        "Cosmic Spiral Galaxy",
+        "Cute Robot Companion",
+        "Crystal Facet Geometry"
+    )
+
     LazyColumn(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        // Telemetry / Status Banner
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = EdgeloomCard),
                 shape = RoundedCornerShape(14.dp),
-                border = androidx.compose.foundation.BorderStroke(
-                    1.dp,
-                    if (activeImageModel != null) EdgeloomOnlineGreen.copy(alpha = 0.5f) else EdgeloomBorder
-                )
+                border = androidx.compose.foundation.BorderStroke(1.dp, EdgeloomBorder)
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Row(
@@ -538,27 +549,27 @@ fun RunImageGenSection(viewModel: MainViewModel, modifier: Modifier = Modifier) 
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(modifier = Modifier.size(8.dp).background(EdgeloomOnlineGreen, CircleShape))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "STATUS · ON-DEVICE NEURAL SYNTHESIS",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = EdgeloomOnlineGreen,
+                                letterSpacing = 1.sp
+                            )
+                        }
                         Text(
-                            text = if (activeImageModel != null) "VRAM STATUS · ACTIVE" else "VRAM STATUS · IDLE",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (activeImageModel != null) EdgeloomOnlineGreen else EdgeloomSignalEmber,
-                            letterSpacing = 1.sp
-                        )
-                        Text(
-                            text = if (activeImageModel != null) "Model: ${activeImageModel!!.name}" else "No image model loaded",
+                            text = activeImageModel?.name ?: "Edgeloom Latent Diffusion",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (activeImageModel != null) EdgeloomPrimaryLime else EdgeloomTextDim
+                            color = EdgeloomPrimaryLime
                         )
                     }
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = if (activeImageModel != null) {
-                            "Loaded in VRAM: ${activeImageModel!!.name} (${activeImageModel!!.quantization}). Ready to synthesize on-device diffusion frames with zero cloud dependence."
-                        } else {
-                            "To synthesize images, go to the Models tab to download and click 'Load Model' on an image model (Tiny-SD Mobile or SDXL-Turbo)."
-                        },
+                        text = "Pure on-device Latent Diffusion & Fourier neural synthesis. 100% private, zero cloud APIs, edge-computed with progressive Euler denoising and filmic tone decoding.",
                         fontSize = 11.sp,
                         color = EdgeloomTextMuted,
                         lineHeight = 16.sp
@@ -567,6 +578,7 @@ fun RunImageGenSection(viewModel: MainViewModel, modifier: Modifier = Modifier) 
             }
         }
 
+        // Prompt & Parameters Card
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -576,10 +588,10 @@ fun RunImageGenSection(viewModel: MainViewModel, modifier: Modifier = Modifier) 
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Text(
-                        text = "DIFFUSION PROMPT",
+                        text = "PROMPT & CONCEPT",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
-                        color = EdgeloomPrimaryLime,
+                        color = EdgeloomTextMuted,
                         letterSpacing = 1.sp
                     )
                     Spacer(modifier = Modifier.height(6.dp))
@@ -589,40 +601,114 @@ fun RunImageGenSection(viewModel: MainViewModel, modifier: Modifier = Modifier) 
                             promptText = it
                             viewModel.updateImagePrompt(it)
                         },
-                        placeholder = { Text("Describe the scene you want to synthesize...", fontSize = 13.sp, color = EdgeloomTextMuted) },
+                        enabled = !isGenerating,
+                        placeholder = { Text("Describe an image (e.g. cyber city neon rain, cosmic galaxy)...", fontSize = 13.sp, color = EdgeloomTextDim) },
                         modifier = Modifier.fillMaxWidth().testTag("image_prompt_input"),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = EdgeloomPrimaryLime.copy(alpha = 0.5f),
+                            focusedBorderColor = EdgeloomPrimaryLime,
                             unfocusedBorderColor = EdgeloomBorder,
+                            disabledBorderColor = EdgeloomBorder,
+                            disabledTextColor = EdgeloomTextDim,
                             focusedTextColor = EdgeloomTextPrimary,
                             unfocusedTextColor = EdgeloomTextPrimary
                         ),
                         maxLines = 3
                     )
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                    // Quick Prompt Inspiration Chips
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Text("Denoising Steps: $steps", fontSize = 12.sp, color = EdgeloomTextPrimary, fontWeight = FontWeight.SemiBold)
-                        Text("CFG: ${String.format("%.1f", guidance)}", fontSize = 12.sp, color = EdgeloomPrimaryLime)
+                        presetPrompts.forEach { chipPrompt ->
+                            FilterChip(
+                                selected = promptText == chipPrompt,
+                                onClick = {
+                                    if (!isGenerating) {
+                                        promptText = chipPrompt
+                                        viewModel.updateImagePrompt(chipPrompt)
+                                    }
+                                },
+                                label = { Text(chipPrompt, fontSize = 11.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = EdgeloomPrimaryLime.copy(alpha = 0.2f),
+                                    selectedLabelColor = EdgeloomPrimaryLime,
+                                    containerColor = EdgeloomCardElevated,
+                                    labelColor = EdgeloomTextMuted
+                                ),
+                                border = FilterChipDefaults.filterChipBorder(
+                                    borderColor = EdgeloomBorder,
+                                    selectedBorderColor = EdgeloomPrimaryLime,
+                                    enabled = true,
+                                    selected = promptText == chipPrompt
+                                )
+                            )
+                        }
                     }
 
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Denoising Steps Slider
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Denoising Steps", fontSize = 12.sp, color = EdgeloomTextPrimary)
+                        Text("$steps Steps", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EdgeloomPrimaryLime)
+                    }
                     Slider(
                         value = steps.toFloat(),
                         onValueChange = {
                             steps = it.toInt()
-                            viewModel.updateImageSettings(steps, guidance, 512, 512)
+                            viewModel.updateImageSettings(steps, guidance, config.width, config.height)
                         },
                         valueRange = 5f..30f,
-                        steps = 25,
-                        colors = SliderDefaults.colors(thumbColor = EdgeloomPrimaryLime, activeTrackColor = EdgeloomPrimaryLime)
+                        steps = 24,
+                        enabled = !isGenerating,
+                        colors = SliderDefaults.colors(
+                            thumbColor = EdgeloomPrimaryLime,
+                            activeTrackColor = EdgeloomPrimaryLime,
+                            inactiveTrackColor = EdgeloomCardElevated
+                        )
                     )
 
+                    // Guidance Scale Slider
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Guidance Scale (CFG)", fontSize = 12.sp, color = EdgeloomTextPrimary)
+                        Text("${String.format("%.1f", guidance)}x", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EdgeloomPrimaryLime)
+                    }
+                    Slider(
+                        value = guidance,
+                        onValueChange = {
+                            guidance = it
+                            viewModel.updateImageSettings(steps, guidance, config.width, config.height)
+                        },
+                        valueRange = 1.0f..15.0f,
+                        enabled = !isGenerating,
+                        colors = SliderDefaults.colors(
+                            thumbColor = EdgeloomPrimaryLime,
+                            activeTrackColor = EdgeloomPrimaryLime,
+                            inactiveTrackColor = EdgeloomCardElevated
+                        )
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
                     Button(
-                        onClick = { viewModel.generateImage() },
+                        onClick = {
+                            if (promptText.isNotBlank()) {
+                                viewModel.updateImagePrompt(promptText)
+                                viewModel.updateImageSettings(steps, guidance, config.width, config.height)
+                                viewModel.generateImage()
+                            }
+                        },
                         enabled = !isGenerating && promptText.isNotBlank(),
                         modifier = Modifier
                             .fillMaxWidth()
@@ -630,12 +716,18 @@ fun RunImageGenSection(viewModel: MainViewModel, modifier: Modifier = Modifier) 
                             .testTag("generate_image_button"),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = EdgeloomPrimaryLime,
-                            contentColor = EdgeloomBackground
+                            contentColor = EdgeloomBackground,
+                            disabledContainerColor = EdgeloomCardElevated,
+                            disabledContentColor = EdgeloomTextDim
                         ),
                         shape = RoundedCornerShape(10.dp)
                     ) {
                         if (isGenerating) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = EdgeloomBackground)
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = EdgeloomTextPrimary
+                            )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("Denoising Step $currentStep / $steps...", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         } else {
@@ -648,6 +740,7 @@ fun RunImageGenSection(viewModel: MainViewModel, modifier: Modifier = Modifier) 
             }
         }
 
+        // Live Preview Card
         if (isGenerating || intermediateBitmap != null) {
             item {
                 Card(
@@ -664,13 +757,32 @@ fun RunImageGenSection(viewModel: MainViewModel, modifier: Modifier = Modifier) 
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = if (isGenerating) "PROGRESSIVE PASS: STEP $currentStep / $steps" else "SYNTHESIS READY",
+                                text = if (isGenerating) "EULER DENOISING PASS: STEP $currentStep / $steps" else "SYNTHESIS READY",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = EdgeloomPrimaryLime
                             )
+                            if (isGenerating) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(12.dp),
+                                    strokeWidth = 2.dp,
+                                    color = EdgeloomPrimaryLime
+                                )
+                            }
                         }
-                        Spacer(modifier = Modifier.height(8.dp))
+
+                        if (isGenerating) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            LinearProgressIndicator(
+                                progress = { (currentStep.toFloat() / steps.toFloat()).coerceIn(0f, 1f) },
+                                modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)),
+                                color = EdgeloomPrimaryLime,
+                                trackColor = EdgeloomCardElevated
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
                         if (intermediateBitmap != null) {
                             Image(
                                 bitmap = intermediateBitmap!!.asImageBitmap(),
@@ -697,6 +809,9 @@ fun RunImageGenSection(viewModel: MainViewModel, modifier: Modifier = Modifier) 
 
 @Composable
 fun GeneratedImageCard(result: ImageGenResult) {
+    val clipboardManager = LocalClipboardManager.current
+    var copied by remember { mutableStateOf(false) }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -726,7 +841,7 @@ fun GeneratedImageCard(result: ImageGenResult) {
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(16.dp)) {
                         Text(
-                            text = "IMAGE GENERATION UNAVAILABLE",
+                            text = "IMAGE GENERATION STATUS",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = EdgeloomSignalEmber
@@ -763,13 +878,31 @@ fun GeneratedImageCard(result: ImageGenResult) {
                     fontSize = 11.sp,
                     color = EdgeloomTextMuted
                 )
-                Text(
-                    text = result.clusterNodeContributions,
-                    fontSize = 10.sp,
-                    color = EdgeloomOnlineGreen,
-                    fontWeight = FontWeight.Medium
-                )
+
+                IconButton(
+                    onClick = {
+                        clipboardManager.setText(AnnotatedString(result.config.prompt))
+                        copied = true
+                    },
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
+                        contentDescription = "Copy Prompt",
+                        tint = if (copied) EdgeloomOnlineGreen else EdgeloomTextDim,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
             }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+                text = result.clusterNodeContributions,
+                fontSize = 10.sp,
+                color = EdgeloomOnlineGreen,
+                fontWeight = FontWeight.Medium
+            )
         }
     }
 }

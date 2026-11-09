@@ -46,6 +46,9 @@ class LocalOpenAiServer(
     private val _lanIp = MutableStateFlow(getDeviceLanIp())
     val lanIp: StateFlow<String> = _lanIp.asStateFlow()
 
+    var onClusterJoinRequest: ((name: String, ip: String, port: Int, memoryMb: Int) -> Boolean)? = null
+    var onClusterNotificationReceived: ((senderName: String, senderIp: String, message: String) -> Unit)? = null
+
     fun updateConfig(newConfig: ServerConfig) {
         val wasRunning = _config.value.isRunning
         _config.value = newConfig
@@ -199,10 +202,65 @@ class LocalOpenAiServer(
                     handleImageGenerations(output, bodyString, clusterNodes, startTime, clientIp, path)
                 }
 
-                // Health check
-                method == "GET" && (path == "/" || path == "/health") -> {
-                    sendJsonResponse(output, 200, """{"status":"ok","server":"LocalNode AI Cluster","nodes":${clusterNodes.size}}""")
-                    recordLog("GET", path, 200, System.currentTimeMillis() - startTime, clientIp, 0, 0, "", "Healthcheck OK")
+                // Cluster Ping & Health check
+                method == "GET" && (path == "/" || path == "/health" || path == "/cluster/ping") -> {
+                    sendJsonResponse(output, 200, """{"status":"ok","server":"LocalNode AI Cluster","nodes":${clusterNodes.size},"timestamp":${System.currentTimeMillis()}}""")
+                    recordLog("GET", path, 200, System.currentTimeMillis() - startTime, clientIp, 0, 0, "", "Cluster Ping / Health OK")
+                }
+
+                // Cluster Join: remote worker node registering with this host
+                method == "POST" && path == "/cluster/join" -> {
+                    try {
+                        val json = JSONObject(bodyString)
+                        val name = json.optString("name", "Worker Node ($clientIp)")
+                        val ip = json.optString("ip", clientIp)
+                        val port = json.optInt("port", 8080)
+                        val memoryMb = json.optInt("memoryMb", 6144)
+
+                        val accepted = onClusterJoinRequest?.invoke(name, ip, port, memoryMb) ?: true
+                        val res = JSONObject().apply {
+                            put("status", if (accepted) "joined" else "rejected")
+                            put("leaderIp", _lanIp.value)
+                            put("leaderPort", _config.value.port)
+                            put("message", if (accepted) "Successfully registered as cluster worker node" else "Host declined join request")
+                        }
+                        sendJsonResponse(output, 200, res.toString())
+                        recordLog("POST", path, 200, System.currentTimeMillis() - startTime, clientIp, 0, 0, bodyString.take(80), "Cluster Join: $name ($ip:$port)")
+                    } catch (e: Exception) {
+                        sendJsonResponse(output, 400, """{"error":{"message":"Invalid JSON payload for cluster join"}}""")
+                    }
+                }
+
+                // Cluster Notify: test notification / ping notification sent across paired phones
+                method == "POST" && path == "/cluster/notify" -> {
+                    try {
+                        val json = JSONObject(bodyString)
+                        val senderName = json.optString("senderName", "Remote Node ($clientIp)")
+                        val senderIp = json.optString("senderIp", clientIp)
+                        val msg = json.optString("message", "Cluster connection test verified! Round-trip communication active.")
+
+                        // Post real Android notification on device
+                        com.example.util.ClusterNotificationManager.showClusterNotification(
+                            context = context,
+                            senderName = senderName,
+                            senderIp = senderIp,
+                            message = msg
+                        )
+
+                        // Trigger in-app alert callback
+                        onClusterNotificationReceived?.invoke(senderName, senderIp, msg)
+
+                        val res = JSONObject().apply {
+                            put("status", "delivered")
+                            put("recipientIp", _lanIp.value)
+                            put("timestamp", System.currentTimeMillis())
+                            put("message", "Test notification delivered to this device")
+                        }
+                        sendJsonResponse(output, 200, res.toString())
+                        recordLog("POST", path, 200, System.currentTimeMillis() - startTime, clientIp, 0, 0, bodyString.take(80), "Cluster Notify from $senderName")
+                    } catch (e: Exception) {
+                        sendJsonResponse(output, 400, """{"error":{"message":"Invalid JSON payload for cluster notify"}}""")
+                    }
                 }
 
                 else -> {
